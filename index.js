@@ -11,7 +11,6 @@ let packageInfo;
 let app;
 let predefinedSpec;
 let spec = {};
-let lastRecordTime = new Date().getTime();
 
 function updateSpecFromPackage() {
 
@@ -40,11 +39,20 @@ function updateSpecFromPackage() {
   if (packageInfo.description) {
     spec.info.description += `\n\n${packageInfo.description}`;
   }
-
 }
 
-function init(aApiDocsPath) {
-  spec = { swagger: '2.0', paths: {} };
+async function init(aApiDocsPath, aPath, aWriteInterval) {
+  let blank = { swagger: '2.0', paths: {} };
+  let parsed = {};
+
+  if (aPath) {
+	try {
+		parsed = await readSpec(aPath)
+	} catch (e) {
+		console.warn(e);
+	}
+  }
+  spec = _.merge(blank, parsed);
 
   const endpoints = listEndpoints(app);
   endpoints.forEach(endpoint => {
@@ -78,6 +86,11 @@ function init(aApiDocsPath) {
 
   updateSpecFromPackage();
   spec = patchSpec(predefinedSpec);
+
+  if (aPath) {
+  	startWriting(aPath, aWriteInterval)
+  }
+
   app.use(packageInfo.baseUrlPath + '/api-spec', (req, res, next) => {
     res.setHeader('Content-Type', 'application/json');
     res.send(JSON.stringify(patchSpec(predefinedSpec), null, 2));
@@ -107,7 +120,7 @@ function getPathKey(req) {
   const pathKeys = Object.keys(spec.paths);
   for (let i = 0; i < pathKeys.length; i += 1) {
     const pathKey = pathKeys[i];
-    if (url.match(`${pathKey.replace(/{([^/]+)}/g, '(?:([^\\\\/]+?))')}/?$`)) {
+    if (url.match(`^${pathKey.replace(/{([^/]+)}/g, '(?:([^\\\\/]+?))')}/?$`)) {
       return pathKey;
     }
   }
@@ -145,50 +158,71 @@ function updateSchemesAndHost(req) {
 module.exports.init = (aApp, aPredefinedSpec, aPath, aWriteInterval, aApiDocsPath = 'api-docs') => {
   app = aApp;
   predefinedSpec = aPredefinedSpec;
-  const writeInterval = aWriteInterval || 10 * 1000;
 
   // middleware to handle responses
   app.use((req, res, next) => {
     try {
       const methodAndPathKey = getMethod(req);
       if (methodAndPathKey && methodAndPathKey.method) {
-        processors.processResponse(res, methodAndPathKey.method);
-      }
-      let firstTime = true;
-      const ts = new Date().getTime();
-      if (firstTime || aPath && ts - lastRecordTime > writeInterval) {
-        firstTime = false;
-        lastRecordTime = ts;
-        fs.writeFile(aPath, JSON.stringify(spec, null, 2), 'utf8', err => {
-          const fullPath = path.resolve(aPath);
-          if (err) {
-            throw new Error(`Cannot store the specification into ${fullPath} because of ${err.message}`);
-          }
-        });
+		processors.processResponse(res, methodAndPathKey.method);
       }
     } catch (e) {}
     next();
   });
 
-  // make sure we list routes after they are configured
-  setTimeout(() => {
-    // middleware to handle requests
-    app.use((req, res, next) => {
-      try {
-        const methodAndPathKey = getMethod(req);
-        if (methodAndPathKey && methodAndPathKey.method && methodAndPathKey.pathKey) {
-          const method = methodAndPathKey.method;
-          updateSchemesAndHost(req);
-          processors.processPath(req, method, methodAndPathKey.pathKey);
-          processors.processHeaders(req, method, spec);
-          processors.processBody(req, method);
-          processors.processQuery(req, method);
-        }
-      } catch (e) {}
-      next();
-    });
-    init(aApiDocsPath);
-  }, 1000);
+  return function() {
+	  app.use((req, res, next) => {
+		  try {
+			  const methodAndPathKey = getMethod(req);
+			  if (methodAndPathKey && methodAndPathKey.method && methodAndPathKey.pathKey) {
+				  const method = methodAndPathKey.method;
+				  updateSchemesAndHost(req);
+				  processors.processPath(req, method, methodAndPathKey.pathKey);
+				  processors.processHeaders(req, method, spec);
+				  processors.processBody(req, method);
+				  processors.processQuery(req, method);
+			  }
+		  } catch (e) {}
+		  next();
+	  });
+	  return init(aApiDocsPath, aPath, aWriteInterval);
+  };
+};
+
+const startWriting = module.exports.startWriting = function (aPath, interval) {
+	module.exports.writeIntervalId = setInterval(() => writeSpec(aPath),  interval || 10 * 1000)
+};
+
+const stopWriting = module.exports.stopWriting = function () {
+	clearInterval(module.exports.writeIntervalId)
+};
+
+const writeSpec = module.exports.writeSpec = function (aPath) {
+	const fullPath = path.resolve(aPath);
+	return new Promise((resolve, reject) => {
+		fs.writeFile(fullPath, JSON.stringify(spec, null, 2), 'utf8', err => {
+			if (err) {
+				reject(new Error(`Cannot write the specification into ${fullPath} because of ${err.message}`));
+			}
+			resolve();
+		});
+	});
+};
+
+const readSpec = module.exports.readSpec = function (aPath) {
+	const fullPath = path.resolve(aPath);
+	return new Promise((resolve, reject) => {
+		fs.readFile(fullPath, { encoding: 'utf-8' }, (err, content) => {
+			if (err) {
+				return reject(err);
+			}
+			try {
+				resolve(JSON.parse(content))
+			} catch (e) {
+				return reject(e);
+			}
+		})
+	});
 };
 
 module.exports.getSpec = () => {

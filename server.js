@@ -7,10 +7,10 @@ const _ = require('lodash');
 const zlib = require('zlib');
 
 const app = express();
-generator.init(app, function (spec) {
+const whenReady = generator.init(app, function (spec) {
   _.set(spec, 'paths["/foo/{name}"].get.parameters[0].description', 'description of a parameter');
   return spec;
-}, './test_spec.json');
+}, './test_spec.json', 1 * 1000);
 
 app.use(bodyParser.json({}));
 let router = express.Router();
@@ -38,5 +38,6 @@ router.route('/gzip')
         })
       });
 app.use(router);
+whenReady();
 app.set('port', 8080);
 app.listen(app.get('port'));
