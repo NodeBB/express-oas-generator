@@ -8,35 +8,35 @@ const zlib = require('zlib');
 
 const app = express();
 const whenReady = generator.init(app, function (spec) {
-  _.set(spec, 'paths["/foo/{name}"].get.parameters[0].description', 'description of a parameter');
-  return spec;
+    _.set(spec, 'paths["/foo/{name}"].get.parameters[0].description', 'description of a parameter');
+    return spec;
 }, './test_spec.json', 1 * 1000);
 
 app.use(bodyParser.json({}));
 let router = express.Router();
 router.route('/foo/stranger')
-      .get(function (req, res, next) {
+    .get(function (req, res, next) {
         //code here
         console.log('calling /foo/stranger');
         res.json({message: 'hello stranger'});
         return next();
-      });
+    });
 router.route('/foo/:name')
-      .get(function (req, res, next) {
+    .get(function (req, res, next) {
         console.log('calling /foo/:name');
         res.json({message: 'hello ' + req.params.name});
         return next();
-      });
+    });
 router.route('/gzip')
-      .get(function (req, res, next) {
+    .get(function (req, res, next) {
         console.log('calling /gzip');
         res.setHeader('Content-Type', 'application/json');
         res.setHeader('Content-Encoding', 'gzip');
         zlib.gzip(JSON.stringify({message: 'gzip'}), function (error, result) {
-          res.status(200).send(result);
-          return next();
+            res.status(200).send(result);
+            return next();
         })
-      });
+    });
 app.use(router);
 whenReady();
 app.set('port', 8080);

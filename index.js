@@ -28,22 +28,22 @@ function updateSpecFromPackage() {
   if (packageInfo.license) {
     spec.info.license = { name: packageInfo.license };
   }
-
   if (packageInfo.baseUrlPath) {
     spec.info.description = '[Specification JSON](' + packageInfo.baseUrlPath + '/api-spec) , base url : ' + packageInfo.baseUrlPath;
   } else {
     packageInfo.baseUrlPath = '';
     spec.info.description = '[Specification JSON](' + packageInfo.baseUrlPath + '/api-spec)';
   }
-
   if (packageInfo.description) {
     spec.info.description += `\n\n${packageInfo.description}`;
   }
 }
 
-async function init(aApiDocsPath, aPath, aWriteInterval) {
+const init = async function(aApiDocsPath, aPath, aWriteInterval) {
   let blank = { swagger: '2.0', paths: {} };
   let parsed = {};
+
+  updateSpecFromPackage();
 
   if (aPath) {
 	try {
@@ -52,7 +52,7 @@ async function init(aApiDocsPath, aPath, aWriteInterval) {
 		console.warn(e);
 	}
   }
-  spec = _.merge(blank, parsed);
+  spec = _.merge(spec || {}, blank, parsed);
 
   const endpoints = listEndpoints(app);
   endpoints.forEach(endpoint => {
@@ -70,8 +70,9 @@ async function init(aApiDocsPath, aPath, aWriteInterval) {
     if (!spec.paths[path]) {
       spec.paths[path] = {};
     }
+
     endpoint.methods.forEach(m => {
-      spec.paths[path][m.toLowerCase()] = {
+      spec.paths[path][m.toLowerCase()] = _.merge({
         summary: path,
         consumes: ['application/json'],
         parameters: params.map(p => ({
@@ -80,11 +81,10 @@ async function init(aApiDocsPath, aPath, aWriteInterval) {
           required: true,
         })) || [],
         responses: {}
-      };
+      }, spec.paths[path][m.toLowerCase()] || {});
     });
   });
 
-  updateSpecFromPackage();
   spec = patchSpec(predefinedSpec);
 
   if (aPath) {
@@ -99,15 +99,15 @@ async function init(aApiDocsPath, aPath, aWriteInterval) {
   app.use(packageInfo.baseUrlPath + '/' + aApiDocsPath, swaggerUi.serve, (req, res) => {
     swaggerUi.setup(patchSpec(predefinedSpec))(req, res);
   });
-}
+};
 
-function patchSpec(predefinedSpec) {
+const patchSpec = function(predefinedSpec) {
   return typeof predefinedSpec === 'object'
     ? utils.sortObject(_.merge(spec, predefinedSpec || {}))
     : predefinedSpec(spec);
-}
+};
 
-function getPathKey(req) {
+const getPathKey = function(req) {
   if (!req.url) {
     return undefined;
   }
@@ -125,7 +125,7 @@ function getPathKey(req) {
     }
   }
   return undefined;
-}
+};
 
 function getMethod(req) {
   if (req.url.startsWith('/api-')) {
@@ -200,7 +200,10 @@ const stopWriting = module.exports.stopWriting = function () {
 const writeSpec = module.exports.writeSpec = function (aPath) {
 	const fullPath = path.resolve(aPath);
 	return new Promise((resolve, reject) => {
-		fs.writeFile(fullPath, JSON.stringify(spec, null, 2), 'utf8', err => {
+	    let spec2 = _.cloneDeep(spec);
+        // let in the info always be auto-populated
+	    delete spec2.info;
+		fs.writeFile(fullPath, JSON.stringify(spec2, null, 2), 'utf8', err => {
 			if (err) {
 				reject(new Error(`Cannot write the specification into ${fullPath} because of ${err.message}`));
 			}
@@ -216,7 +219,7 @@ const readSpec = module.exports.readSpec = function (aPath) {
 			if (err) {
 				return reject(err);
 			}
-			try {
+            try {
 				resolve(JSON.parse(content))
 			} catch (e) {
 				return reject(e);
