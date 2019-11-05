@@ -12,7 +12,7 @@ let app;
 let predefinedSpec;
 let spec = {};
 
-function updateSpecFromPackage() {
+function updateSpecFromPackage(aApiSpecPath) {
 
   /* eslint global-require : off */
   packageInfo = fs.existsSync(packageJsonPath) ? require(packageJsonPath) : {};
@@ -29,21 +29,21 @@ function updateSpecFromPackage() {
     spec.info.license = { name: packageInfo.license };
   }
   if (packageInfo.baseUrlPath) {
-    spec.info.description = '[Specification JSON](' + packageInfo.baseUrlPath + '/api-spec) , base url : ' + packageInfo.baseUrlPath;
+    spec.info.description = '[Specification JSON](' + packageInfo.baseUrlPath + '/' + aApiSpecPath + ') , base url : ' + packageInfo.baseUrlPath;
   } else {
     packageInfo.baseUrlPath = '';
-    spec.info.description = '[Specification JSON](' + packageInfo.baseUrlPath + '/api-spec)';
+    spec.info.description = '[Specification JSON](' + packageInfo.baseUrlPath + '/' + aApiSpecPath + ')';
   }
   if (packageInfo.description) {
     spec.info.description += `\n\n${packageInfo.description}`;
   }
 }
 
-const init = async function(aApiDocsPath, aPath, aWriteInterval) {
+const init = async function(aApiDocsPath, aApiSpecPath, aPath, aWriteInterval) {
   let blank = { swagger: '2.0', paths: {} };
   let parsed = {};
 
-  updateSpecFromPackage();
+  updateSpecFromPackage(aApiSpecPath);
 
   if (aPath) {
 	try {
@@ -91,7 +91,7 @@ const init = async function(aApiDocsPath, aPath, aWriteInterval) {
   	startWriting(aPath, aWriteInterval)
   }
 
-  app.use(packageInfo.baseUrlPath + '/api-spec', (req, res, next) => {
+  app.use(packageInfo.baseUrlPath + '/' + aApiSpecPath, (req, res, next) => {
     res.setHeader('Content-Type', 'application/json');
     res.send(JSON.stringify(patchSpec(predefinedSpec), null, 2));
     next();
@@ -127,8 +127,8 @@ const getPathKey = function(req) {
   return undefined;
 };
 
-function getMethod(req) {
-  if (req.url.startsWith('/api-')) {
+function getMethod(req, aApiSpecPath) {
+  if (req.url.startsWith('/' + aApiSpecPath)) {
     return undefined;
   }
 
@@ -155,14 +155,14 @@ function updateSchemesAndHost(req) {
   }
 }
 
-module.exports.init = (aApp, aPredefinedSpec, aPath, aWriteInterval, aApiDocsPath = 'api-docs') => {
+module.exports.init = (aApp, aPredefinedSpec, aPath, aWriteInterval, aApiDocsPath = 'api-docs', aApiSpecPath = 'api-spec') => {
   app = aApp;
   predefinedSpec = aPredefinedSpec;
 
   // middleware to handle responses
   app.use((req, res, next) => {
     try {
-      const methodAndPathKey = getMethod(req);
+      const methodAndPathKey = getMethod(req, aApiSpecPath);
       if (methodAndPathKey && methodAndPathKey.method) {
 		processors.processResponse(res, methodAndPathKey.method);
       }
@@ -173,7 +173,7 @@ module.exports.init = (aApp, aPredefinedSpec, aPath, aWriteInterval, aApiDocsPat
   return function() {
 	  app.use((req, res, next) => {
 		  try {
-			  const methodAndPathKey = getMethod(req);
+			  const methodAndPathKey = getMethod(req, aApiSpecPath);
 			  if (methodAndPathKey && methodAndPathKey.method && methodAndPathKey.pathKey) {
 				  const method = methodAndPathKey.method;
 				  updateSchemesAndHost(req);
@@ -185,7 +185,7 @@ module.exports.init = (aApp, aPredefinedSpec, aPath, aWriteInterval, aApiDocsPat
 		  } catch (e) {}
 		  next();
 	  });
-	  return init(aApiDocsPath, aPath, aWriteInterval);
+	  return init(aApiDocsPath, aApiSpecPath, aPath, aWriteInterval);
   };
 };
 
