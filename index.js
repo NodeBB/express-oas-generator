@@ -28,7 +28,7 @@ function updateSpecFromPackage({ apiSpecPath, baseUrlPath }) {
   }
   packageInfo.baseUrlPath = packageInfo.baseUrlPath || baseUrlPath;
   if (packageInfo.baseUrlPath) {
-    spec.info.description = `[Specification JSON](${packageInfo.baseUrlPath}${apiSpecPath}), base url : ${packageInfo.baseUrlPath}`;
+    spec.info.description = `[Specification JSON](${packageInfo.baseUrlPath}${apiSpecPath}), base url: [${packageInfo.baseUrlPath}](${packageInfo.baseUrlPath})`;
   } else {
     spec.info.description = `[Specification JSON](${apiSpecPath})`;
   }
