@@ -83,8 +83,6 @@ const init = async function({ app, router, store, apiDocsPath, apiSpecPath, base
     });
   });
 
-  spec = patchSpec(predefined);
-
   if (store) {
   	startWriting(store, writeInterval)
   }
