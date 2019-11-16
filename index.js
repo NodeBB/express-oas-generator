@@ -1,6 +1,5 @@
 const _ = require('lodash');
 const fs = require('fs');
-const path = require('path');
 const swaggerUi = require('swagger-ui-express');
 const utils = require('./lib/utils');
 const processors = require('./lib/processors');
@@ -8,11 +7,10 @@ const listEndpoints = require('express-list-endpoints');
 
 let packageJsonPath = `${process.cwd()}/package.json`;
 let packageInfo;
-let app;
-let predefinedSpec;
+let predefined;
 let spec = {};
 
-function updateSpecFromPackage(aApiSpecPath) {
+function updateSpecFromPackage({ apiSpecPath, baseUrlPath }) {
 
   /* eslint global-require : off */
   packageInfo = fs.existsSync(packageJsonPath) ? require(packageJsonPath) : {};
@@ -28,31 +26,31 @@ function updateSpecFromPackage(aApiSpecPath) {
   if (packageInfo.license) {
     spec.info.license = { name: packageInfo.license };
   }
+  packageInfo.baseUrlPath = packageInfo.baseUrlPath || baseUrlPath;
   if (packageInfo.baseUrlPath) {
-    spec.info.description = '[Specification JSON](' + packageInfo.baseUrlPath + '/' + aApiSpecPath + ') , base url : ' + packageInfo.baseUrlPath;
+    spec.info.description = `[Specification JSON](${packageInfo.baseUrlPath}${apiSpecPath}), base url : ${packageInfo.baseUrlPath}`;
   } else {
-    packageInfo.baseUrlPath = '';
-    spec.info.description = '[Specification JSON](' + packageInfo.baseUrlPath + '/' + aApiSpecPath + ')';
+    spec.info.description = `[Specification JSON](${apiSpecPath})`;
   }
   if (packageInfo.description) {
     spec.info.description += `\n\n${packageInfo.description}`;
   }
 }
 
-const init = async function(aApiDocsPath, aApiSpecPath, aPath, aWriteInterval) {
+const init = async function({ app, router, store, apiDocsPath, apiSpecPath, baseUrlPath, writeInterval }) {
   let blank = { swagger: '2.0', paths: {} };
-  let parsed = {};
+  let stored = {};
 
-  updateSpecFromPackage(aApiSpecPath);
+  updateSpecFromPackage({ apiSpecPath, baseUrlPath });
 
-  if (aPath) {
+  if (store) {
 	try {
-		parsed = await readSpec(aPath)
+        stored = await store.getSpec()
 	} catch (e) {
 		console.warn(e);
 	}
   }
-  spec = _.merge(spec || {}, blank, parsed);
+  spec = _.merge(spec || {}, blank, stored);
 
   const endpoints = listEndpoints(app);
   endpoints.forEach(endpoint => {
@@ -85,26 +83,26 @@ const init = async function(aApiDocsPath, aApiSpecPath, aPath, aWriteInterval) {
     });
   });
 
-  spec = patchSpec(predefinedSpec);
+  spec = patchSpec(predefined);
 
-  if (aPath) {
-  	startWriting(aPath, aWriteInterval)
+  if (store) {
+  	startWriting(store, writeInterval)
   }
 
-  app.use(packageInfo.baseUrlPath + '/' + aApiSpecPath, (req, res, next) => {
-    res.setHeader('Content-Type', 'application/json');
-    res.send(JSON.stringify(patchSpec(predefinedSpec), null, 2));
-    next();
+  router.get(apiSpecPath, (req, res) => {
+    res.json(patchSpec(predefined, { req, res }));
   });
-  app.use(packageInfo.baseUrlPath + '/' + aApiDocsPath, swaggerUi.serve, (req, res) => {
-    swaggerUi.setup(patchSpec(predefinedSpec))(req, res);
+
+  // this is not work? nodebb returns 404
+  app.use(apiDocsPath, swaggerUi.serve, (req, res) => {
+    swaggerUi.setup(patchSpec(predefined))(req, res);
   });
 };
 
-const patchSpec = function(predefinedSpec) {
-  return typeof predefinedSpec === 'object'
-    ? utils.sortObject(_.merge(spec, predefinedSpec || {}))
-    : predefinedSpec(spec);
+const patchSpec = function(predefined, options = {}) {
+  return typeof predefined === 'object'
+    ? utils.sortObject(_.merge(spec, predefined || {}))
+    : typeof predefined === 'function' ? utils.sortObject(predefined(spec, options)) : utils.sortObject(spec)
 };
 
 const getPathKey = function(req) {
@@ -155,14 +153,13 @@ function updateSchemesAndHost(req) {
   }
 }
 
-module.exports.init = (aApp, aPredefinedSpec, aPath, aWriteInterval, aApiDocsPath = 'api-docs', aApiSpecPath = 'api-spec') => {
-  app = aApp;
-  predefinedSpec = aPredefinedSpec;
+module.exports.init = ({ app, router, store, predefinedSpec, apiDocsPath = '/api-docs', apiSpecPath = '/api-spec', baseUrlPath = '', writeInterval }) => {
+  predefined = predefinedSpec;
 
   // middleware to handle responses
   app.use((req, res, next) => {
     try {
-      const methodAndPathKey = getMethod(req, aApiSpecPath);
+      const methodAndPathKey = getMethod(req, apiSpecPath);
       if (methodAndPathKey && methodAndPathKey.method) {
 		processors.processResponse(res, methodAndPathKey.method);
       }
@@ -173,7 +170,7 @@ module.exports.init = (aApp, aPredefinedSpec, aPath, aWriteInterval, aApiDocsPat
   return function() {
 	  app.use((req, res, next) => {
 		  try {
-			  const methodAndPathKey = getMethod(req, aApiSpecPath);
+			  const methodAndPathKey = getMethod(req, apiSpecPath);
 			  if (methodAndPathKey && methodAndPathKey.method && methodAndPathKey.pathKey) {
 				  const method = methodAndPathKey.method;
 				  updateSchemesAndHost(req);
@@ -185,51 +182,16 @@ module.exports.init = (aApp, aPredefinedSpec, aPath, aWriteInterval, aApiDocsPat
 		  } catch (e) {}
 		  next();
 	  });
-	  return init(aApiDocsPath, aApiSpecPath, aPath, aWriteInterval);
+	  return init({ app, router, store, apiDocsPath, apiSpecPath, baseUrlPath, writeInterval });
   };
 };
 
-const startWriting = module.exports.startWriting = function (aPath, interval) {
-	module.exports.writeIntervalId = setInterval(() => writeSpec(aPath),  interval || 10 * 1000)
-};
-
-const stopWriting = module.exports.stopWriting = function () {
-	clearInterval(module.exports.writeIntervalId)
-};
-
-const writeSpec = module.exports.writeSpec = function (aPath) {
-	const fullPath = path.resolve(aPath);
-	return new Promise((resolve, reject) => {
-	    let spec2 = _.cloneDeep(spec);
-        // let in the info always be auto-populated
-	    delete spec2.info;
-		fs.writeFile(fullPath, JSON.stringify(spec2, null, 2), 'utf8', err => {
-			if (err) {
-				reject(new Error(`Cannot write the specification into ${fullPath} because of ${err.message}`));
-			}
-			resolve();
-		});
-	});
-};
-
-const readSpec = module.exports.readSpec = function (aPath) {
-	const fullPath = path.resolve(aPath);
-	return new Promise((resolve, reject) => {
-		fs.readFile(fullPath, { encoding: 'utf-8' }, (err, content) => {
-			if (err) {
-				return reject(err);
-			}
-            try {
-				resolve(JSON.parse(content))
-			} catch (e) {
-				return reject(e);
-			}
-		})
-	});
+const startWriting = module.exports.startWriting = function (store, interval) {
+	module.exports.writeIntervalId = setInterval(() => store.setSpec(spec),  interval || 10 * 1000)
 };
 
 module.exports.getSpec = () => {
-  return patchSpec(predefinedSpec);
+  return patchSpec(predefined);
 };
 
 module.exports.setPackageInfoPath = pkgInfoPath => {
