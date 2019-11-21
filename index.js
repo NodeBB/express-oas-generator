@@ -1,6 +1,5 @@
 const _ = require('lodash');
 const fs = require('fs');
-const swaggerUi = require('swagger-ui-express');
 const utils = require('./lib/utils');
 const processors = require('./lib/processors');
 const listEndpoints = require('express-list-endpoints');
@@ -89,11 +88,6 @@ const init = async function({ app, router, store, apiDocsPath, apiSpecPath, base
 
   router.get(apiSpecPath, (req, res) => {
     res.json(patchSpec(predefined, { req, res }));
-  });
-
-  // this is not work? nodebb returns 404
-  app.use(apiDocsPath, swaggerUi.serve, (req, res) => {
-    swaggerUi.setup(patchSpec(predefined))(req, res);
   });
 };
 
